@@ -21,6 +21,7 @@ in
       akonadi-search
       kmail
       kmail-account-wizard
+      akonadi-import-wizard
     ] ++ lib.optionals cfg.kontact [
       kontact
     ] ++ lib.optionals cfg.merkuro [
