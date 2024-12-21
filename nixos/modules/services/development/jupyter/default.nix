@@ -8,7 +8,13 @@ let
 
   cfg = config.services.jupyter;
 
-  package = cfg.package;
+  package = pkgs.python3.withPackages (
+    ps:
+    [
+      cfg.package
+    ]
+    ++ cfg.extraPackages
+  );
 
   kernels = (
     pkgs.jupyter-kernel.create {
@@ -16,15 +22,17 @@ let
     }
   );
 
-  notebookConfig = pkgs.writeText "jupyter_config.py" ''
-    ${cfg.notebookConfig}
+  notebookConfig = pkgs.writeText "jupyter_server_config.py" ''
+    c.ServerApp.password = "${cfg.password}"
 
-    c.NotebookApp.password = ${cfg.password}
   '';
 
 in
 {
-  meta.maintainers = with lib.maintainers; [ aborsu ];
+  meta.maintainers = with lib.maintainers; [
+    aborsu
+    b-m-f
+  ];
 
   options.services.jupyter = {
     enable = lib.mkEnableOption "Jupyter development server";
@@ -37,14 +45,36 @@ in
       '';
     };
 
-    # NOTE: We don't use top-level jupyter because we don't
-    # want to pass in JUPYTER_PATH but use .environment instead,
-    # saving a rebuild.
-    package = lib.mkPackageOption pkgs [ "python3" "pkgs" "notebook" ] { };
+    package = lib.mkPackageOption pkgs [
+      "python3"
+      "pkgs"
+      "jupyter"
+    ] { };
+
+    extraPackages = lib.mkOption {
+      type = lib.types.listOf lib.types.package;
+      default = [ ];
+      example = ''
+        [
+          pkgs.python3.pkgs.nbconvert
+          pkgs.python3.pkgs.playwright
+        ]
+      '';
+      description = ''Extra packages to be available in the jupyter runtime enviroment'';
+    };
+    extraEnvironmentVariables = lib.mkOption {
+      type = lib.types.attrsOf lib.types.anything;
+      description = ''Extra enviroment variables to be set in the runtime context of jupyter notebook'';
+      default = { };
+      example = ''
+        PLAYWRIGHT_BROWSERS_PATH = "$${pkgs.playwright-driver.browsers}";
+        PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS = "true";
+      '';
+    };
 
     command = lib.mkOption {
       type = lib.types.str;
-      default = "jupyter-notebook";
+      default = "jupyter notebook";
       example = "jupyter-lab";
       description = ''
         Which command the service runs. Note that not all jupyter packages
@@ -93,14 +123,7 @@ in
       type = lib.types.str;
       description = ''
         Password to use with notebook.
-        Can be generated using:
-          In [1]: from notebook.auth import passwd
-          In [2]: passwd('test')
-          Out[2]: 'sha1:1b961dc713fb:88483270a63e57d18d43cf337e629539de1436ba'
-          NOTE: you need to keep the single quote inside the nix string.
-        Or you can use a python oneliner:
-          "open('/path/secret_file', 'r', encoding='utf8').read().strip()"
-        It will be interpreted at the end of the notebookConfig.
+        Can be generated following: https://jupyter-server.readthedocs.io/en/stable/operators/public-server.html#preparing-a-hashed-password
       '';
       example = "'sha1:1b961dc713fb:88483270a63e57d18d43cf337e629539de1436ba'";
     };
@@ -175,7 +198,7 @@ in
 
         environment = {
           JUPYTER_PATH = toString kernels;
-        };
+        } // cfg.extraEnvironmentVariables;
 
         serviceConfig = {
           Restart = "always";
@@ -185,7 +208,8 @@ in
                         --ip=${cfg.ip} \
                         --port=${toString cfg.port} --port-retries 0 \
                         --notebook-dir=${cfg.notebookDir} \
-                        --NotebookApp.config_file=${notebookConfig}
+                        --JupyterApp.config_file=${notebookConfig}
+
           '';
           User = cfg.user;
           Group = cfg.group;
